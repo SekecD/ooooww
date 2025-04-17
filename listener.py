@@ -7,6 +7,8 @@ import pyzmail
 from imapclient import IMAPClient
 from telegram import Bot
 
+from cfg import STEAM_EMAIL
+
 
 class DefaultParser(ABC):
     @abstractmethod
@@ -19,17 +21,12 @@ class SteamParser(DefaultParser):
         message = pyzmail.PyzMessage.factory(raw)
         from_email = message.get_addresses('from')[0][1]
         to_email = message.get_addresses('to')[0][1]
-        if from_email != "noreply@steampowered.com":
+        if from_email != STEAM_EMAIL:
             return None
         body = ""
         if message.text_part:
             body = message.text_part.get_payload().decode(message.text_part.charset)
-
-        match = re.search(r'Код доступа\s+([A-Z0-9]{5})', body)
-        if match:
-            code = match.group(1)
-            return f"На почту {to_email} пришел код: {code}"
-        return None
+        return f"На почту {to_email} пришло сообщение: {body}"
 
 
 class MailListener(object):
@@ -133,21 +130,13 @@ async def listen_mailbox(account, instance, event):
 
             while True:
                 try:
-                    client.idle()
-                    responses = client.idle_check(timeout=60 * 29)
-                    if responses:
-                        for response in responses:
-                            if response[1] == b'EXISTS':
-                                new_uids = client.search(['UID', f'{last_seen_uid + 1}:*'])
-                                for uid in new_uids:
-                                    data = client.fetch([uid], ['INTERNALDATE', 'RFC822'])[uid]
-                                    raw = data[b'RFC822']
-                                    instance(raw)
-                                    last_seen_uid = max(last_seen_uid, uid)
-                finally:
-                    try:
-                        client.idle_done()
-                    except:
-                        pass
+                    new_uids = client.search(['UID', f'{last_seen_uid + 1}:*'])
+                    for uid in filter(lambda x: x > last_seen_uid, new_uids):
+                        data = client.fetch([uid], ['INTERNALDATE', 'RFC822'])[uid]
+                        raw = data[b'RFC822']
+                        instance(raw)
+                        last_seen_uid = max(last_seen_uid, uid)
+                except Exception as e:
+                    pass
 
     await asyncio.to_thread(sync_listen)
